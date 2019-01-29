@@ -1,0 +1,314 @@
+---
+title: "Elections and Perceived Land Tenure in Zambia"
+author: "Ben Ewing"
+date: "January 24, 2019"
+output: beamer_presentation
+header-includes:
+  - \usecolortheme[light]{solarized}
+---
+
+```{r packages, include = F}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(readr)
+library(purrr)
+library(tidyr)
+library(broom)
+library(reggie)
+library(glue)
+library(sf)
+library(ggplot2)
+library(ggthemes)
+theme_set(theme_minimal())
+library(knitr)
+opts_chunk$set(dev = 'pdf', echo = F)
+```
+
+```{r data, include = F}
+tgcc <- read_csv("../data/private/processed/final.csv")
+tgcc$chief_reallocate_any_fear <- tgcc$chief_reallocateh_bin
+tgcc.wide <- tgcc %>% 
+  gather(var, val, -c(hh_serial, time, vilid, treat, chief, matches("^t_"), matches("2015$"),
+                      el_paperdoc_any, matches("2016$"))) %>% 
+  unite(var, var, time) %>% 
+  spread(var, val)
+
+eastern_places <- readRDS("../data/private/interim/eastern_province_gis.rds")
+eastern_border <- read_sf(
+  "../data/raw/earthworks_zmb_consts_and_wards/Zambia_ConstituenciesAndWards_2006to2010_UTM35S.shp"
+) %>% 
+  filter(province == "Eastern")
+eastern_border <- st_transform(eastern_border, crs = "+proj=longlat +datum=WGS84 +no_defs")
+located_polls <- readRDS("../data/interim/polling_station_points.rds")
+tgcc_polls <- located_polls %>% 
+  filter(polling_station_url %in% c(tgcc$polling_station_url_2015, tgcc$polling_station_url_2016))
+tgcc_polls_common <- tgcc_polls %>% 
+  filter(polling_station_id %in% intersect(tgcc_polls$polling_station_id[tgcc_polls$year == 2015],
+                                           tgcc_polls$polling_station_id[tgcc_polls$year == 2016]))
+mean_sd <- function(x) {paste0("Mean: ", round(mean(x, na.rm = T), digits = 3), 
+                               " SD: ", round(sd(x, na.rm = T), digits = 3))}
+```
+
+## Background
+
+## Background
+
+```{r background-timeline}
+data_frame(
+  date = ymd(c(
+    "2014-06-01", "2014-08-01",
+    "2017-06-16", "2017-08-09",
+    "2014-10-28",
+    "2015-01-20",
+    "2016-08-11"
+  )),
+  event = c(
+    "Start: Baseline Data Collection", "End: Baseline Data Collection",
+    "Start: Midline Data Collection", "End: Midline Data Collection",
+    "Death of Michael Sata",
+    "2015 Election",
+    "2016 Election"
+  ),
+  event_class = as.factor(c(
+    "Baseline Data Collection", "Baseline Data Collection", 
+    "Endline Data Collection", "Endline Data Collection",
+    "Death of Michael Sata",
+    "2015 Election",
+    "2016 Election"
+  ))
+) %>% 
+  ggplot(aes(y = 1, x = date, colour = event_class, label = event_class)) +
+  geom_hline(yintercept = 1, size = 1.5) +
+  geom_line(size = 1.5) +
+  geom_point(size = 3) +
+  geom_text(check_overlap = T, vjust = 2) +
+  xlim(ymd(c("2014-01-01", "2017-09-01"))) +
+  scale_colour_few() +
+  coord_fixed(2000) +
+  theme_tufte() +
+  theme(axis.text.y = element_blank(), axis.ticks = element_blank(),
+        axis.title = element_blank(), legend.position="none") 
+```
+
+## Zambian Context
+
+## Zambian Context -> Land
+
+* Majority of land is under customary tenure
+* At local level, land is administered by unelected Chiefs
+
+## Zambian Context -> Elections -> 2015 and 2016
+
+* 2015 Election
+* Snap election after unexpected passing of president, Michael Sata
+* No new voter registration $\Rightarrow$ used 2011 voter rolls
+* 2016 Election
+* Widespread voter registration $\Rightarrow$ updated voter rolls
+
+## Zambian Context -> Elections -> Candidates
+
+* Hichilema Hakainde for the United Party for National Development (UPND)
+* **Edgar Lungu** for the Patriotic Front (PF)
+
+## Zambian Context -> Eastern Province
+
+* Where the data is from
+
+## Data
+
+## Data -> Election Data
+
+* Polling station level vote tallies
+* No exact polling station location
+
+## Data -> GIS Data
+
+* Compiled locations from many GIS datasets
+* Matched location names to polling station names
+* 2015 Election: `r length(unique(located_polls$polling_station_code[located_polls$year == 2015]))`
+* Avg Turnout: `r mean(tgcc_polls$turnout_prop[tgcc_polls$year == 2015])`
+* 2016 Election: `r length(unique(located_polls$polling_station_code[located_polls$year == 2016]))`
+* Avg Turnout: `r mean(tgcc_polls$turnout_prop[tgcc_polls$year == 2016])`
+
+## Data -> GIS Data -> Map
+
+```{r map, cache = T, fig.height = 16, fig.width = 16, fig.align='center'}
+ggplot() +
+  geom_sf(data = eastern_border, colour = few_pal()(8)[3], fill = NA) +
+  geom_sf(data = eastern_places, colour = few_pal()(8)[1], alpha = 0.075) +
+  geom_sf(data = located_polls, colour = few_pal()(8)[4], alpha = 0.75) +
+  geom_sf(data = tgcc_polls, colour = few_pal("Dark")(8)[6], alpha = 1) +
+  theme(axis.text = element_blank())
+```
+
+## Data -> Survey Data
+
+* TGCC RCT
+* Baseline: 2014
+* Endline: 2017
+* N Panel Observations: `r nrow(tgcc.wide)`
+* Tenure security, land investment, land governance indicators
+
+## Data -> Survey Data -> Primary Outcomes
+
+```{r tensec-plot}
+tgcc %>% 
+  select(any_fear, agroforest, fieldpurp_fallow, leader_fair_bin, leader_protect_bin, time) %>%
+  rename(Year = time) %>% mutate(Year = factor(Year, c(0, 1), c(2014, 2017))) %>% 
+  group_by(Year) %>% 
+  summarise_all(funs(sum(., na.rm = T))) %>% 
+  gather(var, val, -Year) %>% 
+  ggplot(aes(x = var, y = val, fill = Year)) +
+  scale_fill_few() +
+  geom_col(position = "dodge") +
+  ylab("N") +
+  theme(axis.title.x =  element_blank())
+```
+
+## Data -> All Together Now
+
+* Matched each village to nearest polling station
+* 2016 Election: 
+* N polling stations: `r length(unique(tgcc_polls$polling_station_code[tgcc_polls$year == 2016]))`
+* N registered voters: `r as.character(sum(tgcc_polls$total_registered_voters[tgcc_polls$year == 2016]))`
+* N votes: `r sum(tgcc_polls$total_votes_cast[tgcc_polls$year == 2016])`
+* EL: `r mean_sd(tgcc_polls$lungu_edgar_c_PF[tgcc_polls$year == 2016]/tgcc_polls$total_votes_cast[tgcc_polls$year == 2016])`
+* HH: `r mean_sd(tgcc_polls$hichilema_hakainde_UPND[tgcc_polls$year == 2016]/tgcc_polls$total_votes_cast[tgcc_polls$year == 2016])`
+
+## Data -> All Together Now -> 2016 Election
+
+```{r 2016-vote-dens}
+tgcc_polls %>% 
+  as.data.frame() %>% 
+  select(lungu_edgar_c_PF, hichilema_hakainde_UPND) %>% 
+  gather(Candidate, Votes) %>% 
+  mutate(Candidate = factor(Candidate, levels = c("lungu_edgar_c_PF", "hichilema_hakainde_UPND"), 
+                            labels = c("EL", "HH"))) %>% 
+  ggplot(aes(Votes, colour = Candidate)) +
+  geom_density() +
+  scale_color_few()
+```
+
+## Results
+
+## Results -> Model
+
+Base model:
+
+$y_{2016} = \beta_0 + \beta_1 y_{2015} + \beta_2 tAnyTenure + \beta_3 pollPropHH2016$
+
+\noindent\rule{\textwidth}{1pt}
+
+Paper document interaction model:
+
+$y_{2016} = \beta_0 + \beta_1 y_{2015} + \beta_2 elPaperdocAny + \beta_3 pollPropHH2016 + \beta_4 (elPaperdocAny * pollPropHH2016)$
+
+\noindent\rule{\textwidth}{1pt}
+
+SEs clustered at polling station level
+
+```{r model-functions}
+build_models <- function(outcomes, fmla) {
+  map_df(outcomes,
+         function(y) {
+           reg(tgcc.wide, glue(fmla),
+               vcov_cluster = ~ polling_station_code_2016, vcov_type = "boot") %>% 
+             summary() %>% 
+             tidy() %>% 
+             mutate(model = y)
+         }) %>% 
+    mutate(term = ifelse(grepl("_0$", term), "lagged", term),
+           model = factor(model, levels = outcomes)) %>% 
+    mutate(ci_low = estimate - std.error*qnorm(0.95), ci_high = estimate + std.error*qnorm(0.95))
+}
+
+model_plot_1 <- function(models, title, subtitle = "") {
+  ggplot(models, aes(x = term, y = estimate, ymin = ci_low, ymax = ci_high)) + 
+    geom_pointrange(colour = "#74a9cf") + 
+    geom_hline(yintercept = 0, colour = "#0570b0", linetype = "dashed") + 
+    facet_wrap( ~ model, ncol = 2) + 
+    ggtitle(title) +
+    coord_flip() + 
+    theme_minimal() + 
+    theme(axis.title = element_blank(), 
+          panel.border = element_rect(colour = "#034e7b", fill = NA), 
+          panel.spacing = unit(1, "lines"))
+}
+
+model_plot_2 <- function(models, title, subtitle = "") {
+  models %>% 
+    filter(term == "poll_prop_hh_2016") %>% 
+    ggplot(aes(x = model, y = estimate, ymin = ci_low, ymax = ci_high)) + 
+    geom_pointrange(colour = "#74a9cf") + 
+    geom_hline(yintercept = 0, colour = "#0570b0", linetype = "dashed") + 
+    ggtitle(title) + 
+    coord_flip() + 
+    theme_minimal() +
+    theme(axis.title = element_blank(), 
+          panel.border = element_rect(colour = "#034e7b", fill = NA), 
+          panel.spacing = unit(1, "lines"))
+}
+
+model_plot_2_int <- function(models, title, subtitle = "") {
+  models %>% 
+    filter(term == "poll_prop_hh_2016" | term == "el_paperdoc_any" | term == "el_paperdoc_any:poll_prop_hh_2016") %>% 
+    ggplot(aes(x = model, y = estimate, ymin = ci_low, ymax = ci_high)) + 
+    geom_pointrange(colour = "#74a9cf") + 
+    geom_hline(yintercept = 0, colour = "#0570b0", linetype = "dashed") +
+    facet_grid(~ term) +
+    ggtitle(title) + 
+    coord_flip() + 
+    theme_minimal() +
+    theme(axis.title = element_blank(), 
+          panel.border = element_rect(colour = "#034e7b", fill = NA), 
+          panel.spacing = unit(1, "lines"))
+}
+```
+
+```{r outcomes-and-models, cache = T, results = 'hide'}
+tensec <- c(
+  "any_fear", "elite_encroach_any_fear", "family_encroach_any_fear",
+  "neighvill_encroach_any_fear", "villhh_encroach_any_fear", "headman_reallocate_any_fear",
+  "chief_reallocate_any_fear"
+)
+investment <- c("agroforest", "fieldpurp_fallow")
+landgov <- c("leader_fair_bin", "leader_protect_bin", "leader_transparent_bin", "leader_trust_bin", 
+             "leaders_accountable_bin")
+
+tensec_md <- build_models(tensec, "{y}_1 ~ {y}_0 + t_tenure + t_agro + t_agroXtenure + poll_prop_hh_2016")
+tensec_interaction_md <- build_models(tensec, "{y}_1 ~ {y}_0 + t_any_agro + el_paperdoc_any + poll_prop_hh_2016 + el_paperdoc_any*poll_prop_hh_2016")
+landgov_md <- build_models(landgov, "{y}_1 ~ {y}_0 + t_tenure + t_agro + t_agroXtenure + poll_prop_hh_2016")
+investment_md <- build_models(investment, "{y}_1 ~ {y}_0 + t_tenure + t_agro + t_agroXtenure + poll_prop_hh_2016")
+```
+
+## Results -> Tenure Security
+
+```{r tensec-results}
+model_plot_2(tensec_md, "Effect of opposition party support on:", "Fear of encroachment indicators")
+```
+
+## Results -> Land Governance
+
+```{r landgov-results}
+model_plot_2(landgov_md, "Effect of opposition party support on:", "Land governance indicators")
+```
+
+## Results -> Land Investment
+
+```{r investment-results}
+model_plot_2(investment_md, "Effect of opposition party support on:", "Land investment indicators")
+```
+
+## Results -> Paper Documentation Interaction Models
+
+```{r paper-doc-interaction}
+model_plot_2_int(tensec_interaction_md, "Effect of opposition party support and land documentation on:")
+```
+
+## Future Work
+
+* Better modeling approach
+* Using 2015 and 2016 election data
+* Within chiefdom models
+* Locate more polling stations
